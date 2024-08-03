@@ -4,6 +4,7 @@ import (
 	"context"
 	"publish_to_messaging_service/internal/app/handler"
 	"publish_to_messaging_service/internal/app/kafkaStore"
+	rabbitmq "publish_to_messaging_service/internal/app/rabbitMQ"
 	"publish_to_messaging_service/internal/config"
 	"publish_to_messaging_service/pkg/domain"
 
@@ -21,10 +22,10 @@ import (
 
 // app is the struct that holds the application
 type app struct {
-	mode    string
-	runMode string
-	ctx     context.Context
-	topic   interface{}
+	mode          string
+	runMode       string
+	ctx           context.Context
+	messageClient interface{}
 }
 
 // newApp creates a new instance of the app
@@ -40,7 +41,7 @@ func newApp(ctx context.Context, mode, runMode string) (domain.App, error) {
 func (ap *app) Init() error {
 	logger.Sugar.Info("app is initializing")
 
-	var newClient interface{}
+	var messageClient interface{}
 	var err error
 
 	switch {
@@ -55,23 +56,31 @@ func (ap *app) Init() error {
 				return err
 			}
 
-			newClient, err = client.CreateTopic(ap.ctx, config.ModeConfig.PubSubs.Topic)
+			messageClient, err = client.CreateTopic(ap.ctx, config.ModeConfig.PubSubs.Topic)
 			if err != nil {
 				return err
 			}
 		} else {
-			newClient = client.Topic(config.ModeConfig.PubSubs.Topic)
+			messageClient = client.Topic(config.ModeConfig.PubSubs.Topic)
 		}
-		newClient.(*pubsub.Topic).EnableMessageOrdering = true
+		messageClient.(*pubsub.Topic).EnableMessageOrdering = true
 
-		ap.topic = newClient
+		ap.messageClient = messageClient
 	case ap.runMode == "kafka":
-		newClient, err = kafkaStore.NewKafkaStore(ap.ctx, config.ModeConfig.KafkaStore.Host, config.ModeConfig.KafkaStore.Port)
+		messageClient, err = kafkaStore.NewKafkaStore(ap.ctx, config.ModeConfig.KafkaStore.Host, config.ModeConfig.KafkaStore.Port)
 		if err != nil {
 			return err
 		}
 
-		ap.topic = newClient
+		ap.messageClient = messageClient
+	case ap.runMode == "rabbitmq":
+		messageClient, err = rabbitmq.NewRabbitMQ(ap.ctx, config.ModeConfig.RabbitMq.Server, config.ModeConfig.RabbitMq.Vhost, config.ModeConfig.RabbitMq.User, config.ModeConfig.RabbitMq.Password)
+		if err != nil {
+			return err
+		}
+
+		ap.messageClient = messageClient
+	default:
 	}
 
 	return nil
@@ -101,9 +110,9 @@ func (a *app) Run() error {
 	})
 
 	handlerContext := &handler.HandlerContext{
-		RunMode: a.runMode,
-		Fiber:   fiberApp,
-		Topic:   a.topic,
+		RunMode:       a.runMode,
+		Fiber:         fiberApp,
+		MessageClient: a.messageClient,
 	}
 
 	fiberApp.Use(fiberLogger.New())

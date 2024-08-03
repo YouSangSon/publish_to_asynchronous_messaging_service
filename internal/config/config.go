@@ -12,9 +12,10 @@ var (
 )
 
 const (
-	envConfigPath = "configJson/config.json"
-	envPubSubPath = "configJson/pub_sub.json"
-	envKafkaPath  = "configJson/kafka.json"
+	envConfigPath   = "configJson/config.json"
+	envPubSubPath   = "configJson/pub_sub.json"
+	envKafkaPath    = "configJson/kafka.json"
+	envRabbitmqPath = "configJson/rabbitmq.json"
 )
 
 type Configurations struct {
@@ -23,9 +24,10 @@ type Configurations struct {
 }
 
 type Configuration struct {
-	Logging    zap.Config   `json:"logging"`
-	PubSubs    *pubSub      `json:"pub_subs,omitempty"`
-	KafkaStore *storeConfig `json:"kafka_store,omitempty"`
+	Logging    zap.Config      `json:"logging"`
+	PubSubs    *pubSub         `json:"pub_subs,omitempty"`
+	KafkaStore *storeConfig    `json:"kafka_store,omitempty"`
+	RabbitMq   *rabbitMqConfig `json:"rabbitmq,omitempty"`
 }
 
 type kafkaConfig struct {
@@ -58,6 +60,13 @@ type pubSub struct {
 	Subname string `json:"subname"`
 }
 
+type rabbitMqConfig struct {
+	Server   string `json:"server"`
+	Vhost    string `json:"vhost"`
+	User     string `json:"user"`
+	Password string `json:"password"`
+}
+
 // InitConfig initializes the configuration
 func InitConfig(mode, runMode string) error {
 	var configurations Configurations
@@ -85,6 +94,15 @@ func InitConfig(mode, runMode string) error {
 
 		configurations.Pro.KafkaStore = kafkaConfig.Pro.KafkaStore
 		configurations.Dev.KafkaStore = kafkaConfig.Dev.KafkaStore
+	case "rabbitmq":
+		var rabbitMqConfig rabbitMqConfig
+
+		if err := loadConfig(envRabbitmqPath, &rabbitMqConfig); err != nil {
+			return err
+		}
+
+		configurations.Pro.RabbitMq = &rabbitMqConfig
+		configurations.Dev.RabbitMq = &rabbitMqConfig
 	default:
 	}
 

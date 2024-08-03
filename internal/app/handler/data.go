@@ -25,7 +25,7 @@ func (hc *HandlerContext) PostData(f *fiber.Ctx) error {
 		})
 	}
 
-	if err := hc.Publish(f.Context(), hc.RunMode, hc.Topic, sensorData.Data); err != nil {
+	if err := hc.Publish(f.Context(), hc.RunMode, hc.MessageClient, sensorData.Data); err != nil {
 		logger.Sugar.Errorf("error publishing data : %s", err.Error())
 		return f.Status(http.StatusInternalServerError).JSON(domain.Response{
 			Result:  "failed",
@@ -40,10 +40,10 @@ func (hc *HandlerContext) PostData(f *fiber.Ctx) error {
 }
 
 // Publish is the function that publishes the data to the messaging service
-func (hc *HandlerContext) Publish(ctx context.Context, runMode string, topic interface{}, data []byte) error {
+func (hc *HandlerContext) Publish(ctx context.Context, runMode string, messageClient interface{}, data []byte) error {
 	switch runMode {
 	case "pubsub":
-		pubsubTopic, ok := topic.(*pubsub.Topic)
+		pubsubTopic, ok := messageClient.(*pubsub.Topic)
 		if !ok {
 			return fmt.Errorf("invalid topic type for pubsub")
 		}
@@ -54,15 +54,43 @@ func (hc *HandlerContext) Publish(ctx context.Context, runMode string, topic int
 			return fmt.Errorf("pubsub operation failed : %s", err.Error())
 		}
 	case "kafka":
-		KafkaStore, ok := topic.(domain.KafkaStore)
+		kafkaStore, ok := messageClient.(domain.KafkaStore)
 		if !ok {
 			return fmt.Errorf("invalid topic type for kafka")
 		}
 
 		key := []byte("test")
 
-		if err := KafkaStore.Publish(config.ModeConfig.KafkaStore.Topic, key, data, nil); err != nil {
+		if err := kafkaStore.Publish(config.ModeConfig.KafkaStore.Topic, key, data, nil); err != nil {
 			return fmt.Errorf("kafka operation failed : %s", err.Error())
+		}
+	case "rabbitmq":
+		rabbit, ok := messageClient.(domain.RabbitMQ)
+		if !ok {
+			return fmt.Errorf("invalid topic type for rabbitmq")
+		}
+
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+					result, err := rabbit.Subscribe(domain.RESULT)
+					if err != nil {
+						logger.Sugar.Errorf("error subscribing to rabbitmq : %s", err.Error())
+						return
+					}
+
+					for msg := range result {
+						logger.Sugar.Infof("received message: %s", string(msg.Body))
+					}
+				}
+			}
+		}()
+
+		if err := rabbit.Publish(domain.DATA, data); err != nil {
+			return fmt.Errorf("rabbitmq operation failed : %s", err.Error())
 		}
 	default:
 		return fmt.Errorf("unsupported run mode: %s", runMode)
